@@ -30,11 +30,11 @@ export class Preloader extends Scene {
 
     this.load.image('logo', 'logo.png');
 
-    this.load.image('board', 'boards/board_plain_01.png');
+    this.load.image('board', 'board.png');
 
-    this.load.spritesheet('bpieces', '16x16/BlackPieces.png', { frameWidth: 16, frameHeight: 16 });
+    this.load.spritesheet('bpieces', 'bpieces.png', { frameWidth: 80, frameHeight: 80 });
 
-    this.load.spritesheet('wpieces', '16x16/WhitePieces.png', { frameWidth: 16, frameHeight: 16 });
+    this.load.spritesheet('wpieces', 'wpieces.png', { frameWidth: 80, frameHeight: 80 });
   }
 
   create() {
