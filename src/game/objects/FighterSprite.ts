@@ -50,9 +50,11 @@ export class FighterSprite extends Phaser.Physics.Arcade.Sprite {
     this.feetHitbox = this.createHitbox(150, 130, 0x0000ff);
     this.attackBox = this.createHitbox(60, 40, 0xff0000);
 
-    // Attack box visibility
-    this.attackBox.setFillStyle(0xff0000, 0.4);
-    this.attackBox.setStrokeStyle(2, 0xff0000);
+    // Attack box visibility (debug only)
+    if (this.scene.physics.config.debug) {
+      this.attackBox.setFillStyle(0xff0000, 0.4);
+      this.attackBox.setStrokeStyle(2, 0xff0000);
+    }
     this.attackBox.setVisible(false);
     (this.attackBox.body as Phaser.Physics.Arcade.Body).enable = false;
 

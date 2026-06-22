@@ -1,6 +1,7 @@
 import { Scene } from 'phaser';
 import { Piece, PieceType, PieceColor } from '../objects/Piece';
 import { Board, BOARD_CONFIG } from '../objects/Board';
+import { network, ChessMove } from '../network/NetworkManager';
 
 export class Game extends Scene {
   camera: Phaser.Cameras.Scene2D.Camera;
@@ -15,6 +16,8 @@ export class Game extends Scene {
   #promotionUI: Phaser.GameObjects.Container;
   #cpuMode: boolean = false;
   #cpuMoving: boolean = false;
+  #onlineMode: boolean = false;
+  #myColor: PieceColor = PieceColor.WHITE;
 
   constructor() {
     super('Game');
@@ -22,6 +25,8 @@ export class Game extends Scene {
 
   init(data: any) {
     this.#cpuMode = data?.cpu === true;
+    this.#onlineMode = data?.online === true;
+    this.#myColor = data?.color === 'BLACK' ? PieceColor.BLACK : PieceColor.WHITE;
   }
 
   public handleFightResult(data: any) {
@@ -60,9 +65,27 @@ export class Game extends Scene {
     this.#createPromotionUI();
     this.#updateUI();
 
+    if (this.#onlineMode) {
+      network.setCallbacks({
+        onMatchFound: () => {},
+        onQueueStatus: () => {},
+        onOpponentMove: (data: ChessMove) => this.#handleOpponentMove(data),
+        onOpponentInput: () => {},
+        onOpponentFightStart: (data: any) => this.#handleOpponentFightStart(data),
+        onFightResult: () => {},
+        onOpponentDisconnected: () => {
+          this.msg_text.setText('OPPONENT DISCONNECTED');
+        },
+        onError: (msg: string) => {
+          this.msg_text.setText(`Error: ${msg}`);
+        },
+      });
+    }
+
     this.input.on(Phaser.Input.Events.POINTER_DOWN, (pointer: Phaser.Input.Pointer) => {
       if (this.#pendingMove || this.#pendingPromotion) return;
       if (this.#cpuMode && this.#currentTurn === PieceColor.BLACK) return;
+      if (this.#onlineMode && this.#currentTurn !== this.#myColor) return;
       if (pointer.leftButtonDown()) {
         const { j: targetJ, i: targetI } = this.#board.getGridCoords(pointer.x, pointer.y);
 
@@ -192,6 +215,7 @@ export class Game extends Scene {
     this.input.on(Phaser.Input.Events.DRAG_START, (_pointer: Phaser.Input.Pointer, gameObject: Piece) => {
       if (this.#pendingMove || this.#pendingPromotion) return;
       if (this.#cpuMode && this.#currentTurn === PieceColor.BLACK) return;
+      if (this.#onlineMode && gameObject.pieceColor !== this.#myColor) return;
       if (gameObject.pieceColor !== this.#currentTurn) return;
       gameObject.setData({ x: gameObject.x, y: gameObject.y });
       this.#board.setPlaceDepth(gameObject.boardJ, gameObject.boardI, 2);
@@ -324,6 +348,30 @@ export class Game extends Scene {
     return false;
   }
 
+  #handleOpponentMove(data: ChessMove): void {
+    const piece = this.#board.getPieceAt(data.fromJ, data.fromI);
+    if (piece) {
+      this.#executeMove(piece, data.toJ, data.toI, true);
+    }
+  }
+
+  #handleOpponentFightStart(data: any): void {
+    const attacker = this.#board.getPieceAt(data.attacker.boardJ, data.attacker.boardI);
+    const defender = this.#board.getPieceAt(data.defender.boardJ, data.defender.boardI);
+    if (attacker && defender) {
+      this.scene.launch('Fight', {
+        attacker: attacker,
+        defender: defender,
+        targetJ: data.targetJ,
+        targetI: data.targetI,
+        toggleTurn: data.toggleTurn,
+        online: true,
+        playerIndex: 1,
+      });
+      this.scene.pause();
+    }
+  }
+
   #getCPUMove(): { piece: Piece, targetJ: number, targetI: number } | null {
     const moves: { piece: Piece, targetJ: number, targetI: number, score: number }[] = [];
     const pieceValues: Record<number, number> = {
@@ -382,6 +430,11 @@ export class Game extends Scene {
     const isEnPassant = piece.pieceType === PieceType.PAWN && Math.abs(targetI - piece.boardI) === 1 && !targetPiece;
     if (targetPiece || isEnPassant) {
       const defender = targetPiece || this.#board.getPieceAt(piece.boardJ, targetI);
+
+      if (this.#onlineMode) {
+        network.sendFightStart({ attacker: piece, defender, targetJ, targetI, toggleTurn });
+      }
+
       this.scene.launch('Fight', {
         attacker: piece,
         defender: defender,
@@ -389,11 +442,18 @@ export class Game extends Scene {
         targetI: targetI,
         toggleTurn: toggleTurn,
         cpu: this.#cpuMode,
-        cpuAttacker: this.#cpuMode && piece.pieceColor === PieceColor.BLACK
+        cpuAttacker: this.#cpuMode && piece.pieceColor === PieceColor.BLACK,
+        online: this.#onlineMode,
+        playerIndex: this.#onlineMode ? 0 : undefined,
       });
       this.scene.pause();
       return;
     }
+
+    if (this.#onlineMode) {
+      network.sendChessMove({ fromJ: piece.boardJ, fromI: piece.boardI, toJ: targetJ, toI: targetI });
+    }
+
     this.#executeMove(piece, targetJ, targetI, toggleTurn);
   }
 

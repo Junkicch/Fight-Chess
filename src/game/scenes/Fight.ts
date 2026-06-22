@@ -2,6 +2,7 @@ import { Scene } from 'phaser';
 import { FighterSprite } from '../objects/FighterSprite';
 import { FIGHTERS_DATA } from '../objects/Fighter';
 import { PieceType } from '../objects/Piece';
+import { network, InputState } from '../network/NetworkManager';
 
 const DEBUG = false;
 
@@ -31,6 +32,9 @@ export class Fight extends Scene {
   isManualSelection: boolean = true;
   isCPU: boolean = false;
   cpuAttacker: boolean = false;
+  isOnline: boolean = false;
+  playerIndex: number = 0;
+  private networkInput: InputState | null = null;
   isFightOver: boolean = false;
   private cpuReactionDelay: number = 0;
 
@@ -56,10 +60,14 @@ export class Fight extends Scene {
       this.isManualSelection = false;
       this.isCPU = data.cpu === true;
       this.cpuAttacker = data.cpuAttacker === true;
+      this.isOnline = data.online === true;
+      this.playerIndex = data.playerIndex ?? 0;
     } else {
       this.isManualSelection = true;
       this.isCPU = false;
       this.cpuAttacker = false;
+      this.isOnline = false;
+      this.playerIndex = 0;
     }
   }
 
@@ -275,6 +283,23 @@ export class Fight extends Scene {
       this.p1Keys = this.input.keyboard.addKeys('W,A,S,D,T,Y,U,G,H,J');
       this.p2AttackKeys = this.input.keyboard.addKeys('NUMPAD_ONE,NUMPAD_TWO,NUMPAD_THREE,NUMPAD_FOUR,NUMPAD_FIVE,NUMPAD_SIX');
     }
+
+    if (this.isOnline) {
+      network.setCallbacks({
+        onMatchFound: () => {},
+        onQueueStatus: () => {},
+        onOpponentMove: () => {},
+        onOpponentInput: (input: InputState) => {
+          this.networkInput = input;
+        },
+        onOpponentFightStart: () => {},
+        onFightResult: () => {},
+        onOpponentDisconnected: () => {
+          this.isFightOver = true;
+        },
+        onError: () => {},
+      });
+    }
   }
 
   private checkHit(attacker: FighterSprite, defender: FighterSprite, damagePct: number) {
@@ -364,6 +389,91 @@ export class Fight extends Scene {
     return { left: forward === 'left', right: forward === 'right', up: false, down: false, lp: false, mp: false, hp: false, lk: false, mk: false, hk: false };
   }
 
+  #handleLocalInput(): void {
+    if (this.player1 && this.p1Keys) {
+        this.player1.handleInput({
+            left: this.p1Keys.A.isDown,
+            right: this.p1Keys.D.isDown,
+            up: this.p1Keys.W.isDown,
+            down: this.p1Keys.S.isDown,
+            lp: this.p1Keys.T.isDown,
+            mp: this.p1Keys.Y.isDown,
+            hp: this.p1Keys.U.isDown,
+            lk: this.p1Keys.G.isDown,
+            mk: this.p1Keys.H.isDown,
+            hk: this.p1Keys.J.isDown
+        }, this.player2.x, this.player2.getIsAttacking());
+    }
+
+    if (this.player2 && (this.isCPU || (this.cursors && this.p2AttackKeys))) {
+        const controls = this.isCPU ? this.getCPUControls() : {
+            left: this.cursors.left.isDown,
+            right: this.cursors.right.isDown,
+            up: this.cursors.up.isDown,
+            down: this.cursors.down.isDown,
+            lp: this.p2AttackKeys.NUMPAD_FOUR.isDown,
+            mp: this.p2AttackKeys.NUMPAD_FIVE.isDown,
+            hp: this.p2AttackKeys.NUMPAD_SIX.isDown,
+            lk: this.p2AttackKeys.NUMPAD_ONE.isDown,
+            mk: this.p2AttackKeys.NUMPAD_TWO.isDown,
+            hk: this.p2AttackKeys.NUMPAD_THREE.isDown
+        };
+        this.player2.handleInput(controls, this.player1.x, this.player1.getIsAttacking());
+    }
+  }
+
+  #handleOnlineInput(): void {
+    if (!this.player1 || !this.player2) return;
+
+    const p1Input: InputState = {
+      left: this.p1Keys?.A.isDown ?? false,
+      right: this.p1Keys?.D.isDown ?? false,
+      up: this.p1Keys?.W.isDown ?? false,
+      down: this.p1Keys?.S.isDown ?? false,
+      lp: this.p1Keys?.T.isDown ?? false,
+      mp: this.p1Keys?.Y.isDown ?? false,
+      hp: this.p1Keys?.U.isDown ?? false,
+      lk: this.p1Keys?.G.isDown ?? false,
+      mk: this.p1Keys?.H.isDown ?? false,
+      hk: this.p1Keys?.J.isDown ?? false,
+    };
+
+    const p2Input: InputState = {
+      left: this.cursors?.left.isDown ?? false,
+      right: this.cursors?.right.isDown ?? false,
+      up: this.cursors?.up.isDown ?? false,
+      down: this.cursors?.down.isDown ?? false,
+      lp: this.p2AttackKeys?.NUMPAD_FOUR.isDown ?? false,
+      mp: this.p2AttackKeys?.NUMPAD_FIVE.isDown ?? false,
+      hp: this.p2AttackKeys?.NUMPAD_SIX.isDown ?? false,
+      lk: this.p2AttackKeys?.NUMPAD_ONE.isDown ?? false,
+      mk: this.p2AttackKeys?.NUMPAD_TWO.isDown ?? false,
+      hk: this.p2AttackKeys?.NUMPAD_THREE.isDown ?? false,
+    };
+
+    // Send our controlled fighter's input to network
+    if (this.playerIndex === 0) {
+      network.sendFightInput(p1Input);
+    } else {
+      network.sendFightInput(p2Input);
+    }
+
+    // Apply local input to our fighter, network input to opponent
+    const myInput = this.playerIndex === 0 ? p1Input : p2Input;
+    const myFighter = this.playerIndex === 0 ? this.player1 : this.player2;
+    const oppFighter = this.playerIndex === 0 ? this.player2 : this.player1;
+    const oppInput = this.networkInput;
+
+    myFighter.handleInput(myInput, oppFighter.x, oppFighter.getIsAttacking());
+
+    if (oppInput) {
+      oppFighter.handleInput(oppInput, myFighter.x, myFighter.getIsAttacking());
+    } else {
+      // Opponent not connected yet / no input received
+      oppFighter.handleInput({ left: false, right: false, up: false, down: false, lp: false, mp: false, hp: false, lk: false, mk: false, hk: false }, myFighter.x, myFighter.getIsAttacking());
+    }
+  }
+
   update() {
     if (!this.player1 || !this.player2 || this.isFightOver) return;
 
@@ -419,35 +529,10 @@ export class Fight extends Scene {
         this.p2HealthBarFill.setSize(300 * (this.player2.life / this.player2.maxLife), 40);
     }
 
-    if (this.player1 && this.p1Keys) {
-        this.player1.handleInput({
-            left: this.p1Keys.A.isDown,
-            right: this.p1Keys.D.isDown,
-            up: this.p1Keys.W.isDown,
-            down: this.p1Keys.S.isDown,
-            lp: this.p1Keys.T.isDown,
-            mp: this.p1Keys.Y.isDown,
-            hp: this.p1Keys.U.isDown,
-            lk: this.p1Keys.G.isDown,
-            mk: this.p1Keys.H.isDown,
-            hk: this.p1Keys.J.isDown
-        }, this.player2.x, this.player2.getIsAttacking());
-    }
-
-    if (this.player2 && (this.isCPU || (this.cursors && this.p2AttackKeys))) {
-        const controls = this.isCPU ? this.getCPUControls() : {
-            left: this.cursors.left.isDown,
-            right: this.cursors.right.isDown,
-            up: this.cursors.up.isDown,
-            down: this.cursors.down.isDown,
-            lp: this.p2AttackKeys.NUMPAD_FOUR.isDown,
-            mp: this.p2AttackKeys.NUMPAD_FIVE.isDown,
-            hp: this.p2AttackKeys.NUMPAD_SIX.isDown,
-            lk: this.p2AttackKeys.NUMPAD_ONE.isDown,
-            mk: this.p2AttackKeys.NUMPAD_TWO.isDown,
-            hk: this.p2AttackKeys.NUMPAD_THREE.isDown
-        };
-        this.player2.handleInput(controls, this.player1.x, this.player1.getIsAttacking());
+    if (this.isOnline) {
+        this.#handleOnlineInput();
+    } else {
+        this.#handleLocalInput();
     }
   }
 }
