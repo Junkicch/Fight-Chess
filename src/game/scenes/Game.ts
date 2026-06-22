@@ -2,8 +2,6 @@ import { Scene } from 'phaser';
 import { Piece, PieceType, PieceColor } from '../objects/Piece';
 import { Board, BOARD_CONFIG } from '../objects/Board';
 
-const DEBUG = false;
-
 export class Game extends Scene {
   camera: Phaser.Cameras.Scene2D.Camera;
   msg_text: Phaser.GameObjects.Text;
@@ -14,12 +12,32 @@ export class Game extends Scene {
   #currentTurn: PieceColor = PieceColor.WHITE;
   #pendingMove: { piece: Piece, targetJ: number, targetI: number, toggleTurn: boolean } | null = null;
   #pendingPromotion: Piece | null = null;
-  #challengeUI: Phaser.GameObjects.Container;
-  #challengeResultText: Phaser.GameObjects.Text;
   #promotionUI: Phaser.GameObjects.Container;
+  #cpuMode: boolean = false;
+  #cpuMoving: boolean = false;
 
   constructor() {
     super('Game');
+  }
+
+  init(data: any) {
+    this.#cpuMode = data?.cpu === true;
+  }
+
+  public handleFightResult(data: any) {
+    const { winner, attacker, targetJ, targetI, toggleTurn } = data;
+    const piece = this.#board.getPieceAt(attacker.boardJ, attacker.boardI);
+    if (piece) {
+      if (winner === 'attacker') {
+        this.#executeMove(piece, targetJ, targetI, toggleTurn);
+      } else {
+        // Attacker lost
+        this.#board.removePiece(piece);
+        piece.destroy();
+        this.#currentTurn = toggleTurn ? (this.#currentTurn === PieceColor.WHITE ? PieceColor.BLACK : PieceColor.WHITE) : this.#currentTurn;
+        this.#updateUI();
+      }
+    }
   }
 
   create() {
@@ -39,12 +57,12 @@ export class Game extends Scene {
 
     this.#setupInitialBoard();
     this.#createDragEvents();
-    this.#createChallengeUI();
     this.#createPromotionUI();
     this.#updateUI();
 
     this.input.on(Phaser.Input.Events.POINTER_DOWN, (pointer: Phaser.Input.Pointer) => {
       if (this.#pendingMove || this.#pendingPromotion) return;
+      if (this.#cpuMode && this.#currentTurn === PieceColor.BLACK) return;
       if (pointer.leftButtonDown()) {
         const { j: targetJ, i: targetI } = this.#board.getGridCoords(pointer.x, pointer.y);
 
@@ -57,28 +75,52 @@ export class Game extends Scene {
 
         const piece = this.#board.getPieceAt(targetJ, targetI);
         if (piece && piece.pieceColor === this.#currentTurn) {
-          // If in check, restrict selection to the King piece for clicking
-          let kingJ = -1, kingI = -1;
-          for (let j = 0; j < 8; j++) {
-            for (let i = 0; i < 8; i++) {
-              const p = this.#board.getPieceAt(j, i);
-              if (p && p.pieceType === PieceType.KING && p.pieceColor === this.#currentTurn) {
-                kingJ = j; kingI = i; break;
-              }
-            }
-          }
-          const enemyColor = this.#currentTurn === PieceColor.WHITE ? PieceColor.BLACK : PieceColor.WHITE;
-          const isInCheck = kingJ !== -1 && this.#isSquareAttacked(kingJ, kingI, enemyColor);
-
-          if (isInCheck && piece.pieceType !== PieceType.KING) {
-            return;
-          }
-
           this.#selectedPiece = piece;
           this.#showValidMoves(piece);
         }
       }
     });
+  }
+
+  #isMoveLegal(piece: Piece, targetJ: number, targetI: number): boolean {
+    const color = piece.pieceColor;
+    const enemyColor = color === PieceColor.WHITE ? PieceColor.BLACK : PieceColor.WHITE;
+
+    // Simulation
+    const originalJ = piece.boardJ;
+    const originalI = piece.boardI;
+    
+    // Handle En Passant simulation
+    let epPawn: Piece | null = null;
+    if (piece.pieceType === PieceType.PAWN && Math.abs(targetI - originalI) === 1 && this.#board.getPieceAt(targetJ, targetI) === null) {
+      epPawn = this.#board.getPieceAt(originalJ, targetI);
+      if (epPawn) epPawn.setData('isCapturedSim', true);
+    }
+
+    const targetPiece = this.#board.getPieceAt(targetJ, targetI);
+    piece.boardJ = targetJ;
+    piece.boardI = targetI;
+    if (targetPiece) targetPiece.setData('isCapturedSim', true);
+
+    let kingJ = -1, kingI = -1;
+    for (let j = 0; j < 8; j++) {
+      for (let i = 0; i < 8; i++) {
+        const p = this.#board.getPieceAt(j, i);
+        if (p && p.pieceType === PieceType.KING && p.pieceColor === color) {
+          kingJ = j; kingI = i; break;
+        }
+      }
+    }
+
+    const illegal = kingJ !== -1 && this.#isSquareAttacked(kingJ, kingI, enemyColor);
+
+    // Revert
+    piece.boardJ = originalJ;
+    piece.boardI = originalI;
+    if (targetPiece) targetPiece.setData('isCapturedSim', false);
+    if (epPawn) epPawn.setData('isCapturedSim', false);
+
+    return !illegal;
   }
 
   #createPiece(j: number, i: number, draggable: boolean): Piece | null {
@@ -147,8 +189,10 @@ export class Game extends Scene {
   }
 
   #createDragStartEventListener(): void {
-    this.input.on(Phaser.Input.Events.DRAG_START, (pointer: Phaser.Input.Pointer, gameObject: Piece) => {
-      if (this.#pendingMove || this.#pendingPromotion || gameObject.pieceColor !== this.#currentTurn) return;
+    this.input.on(Phaser.Input.Events.DRAG_START, (_pointer: Phaser.Input.Pointer, gameObject: Piece) => {
+      if (this.#pendingMove || this.#pendingPromotion) return;
+      if (this.#cpuMode && this.#currentTurn === PieceColor.BLACK) return;
+      if (gameObject.pieceColor !== this.#currentTurn) return;
       gameObject.setData({ x: gameObject.x, y: gameObject.y });
       this.#board.setPlaceDepth(gameObject.boardJ, gameObject.boardI, 2);
       gameObject.setAlpha(0.8);
@@ -158,7 +202,7 @@ export class Game extends Scene {
   }
 
   #createDragEventListener(): void {
-    this.input.on(Phaser.Input.Events.DRAG, (pointer: Phaser.Input.Pointer, gameObject: Piece, dragX: number, dragY: number) => {
+    this.input.on(Phaser.Input.Events.DRAG, (_pointer: Phaser.Input.Pointer, gameObject: Piece, dragX: number, dragY: number) => {
       if (gameObject !== this.#selectedPiece) return;
       gameObject.setPosition(dragX, dragY);
     });
@@ -195,43 +239,13 @@ export class Game extends Scene {
   }
 
   #isCheckmate(color: PieceColor): boolean {
-    const enemyColor = color === PieceColor.WHITE ? PieceColor.BLACK : PieceColor.WHITE;
-    let kingJ = -1, kingI = -1;
-    for (let j = 0; j < 8; j++) {
-      for (let i = 0; i < 8; i++) {
-        const p = this.#board.getPieceAt(j, i);
-        if (p && p.pieceType === PieceType.KING && p.pieceColor === color) {
-          kingJ = j; kingI = i; break;
-        }
-      }
-    }
-    if (kingJ === -1 || !this.#isSquareAttacked(kingJ, kingI, enemyColor)) return false;
-
     for (let j = 0; j < 8; j++) {
       for (let i = 0; i < 8; i++) {
         const p = this.#board.getPieceAt(j, i);
         if (p && p.pieceColor === color) {
           for (let tj = 0; tj < 8; tj++) {
             for (let ti = 0; ti < 8; ti++) {
-              if (this.#isValidMove(p, tj, ti)) {
-                const targetPiece = this.#board.getPieceAt(tj, ti);
-                const oj = p.boardJ, oi = p.boardI;
-                
-                // Simulação
-                p.boardJ = tj; p.boardI = ti;
-                if (targetPiece) targetPiece.setData('isCapturedSim', true);
-                
-                let kj = kingJ, ki = kingI;
-                if (p.pieceType === PieceType.KING) { kj = tj; ki = ti; }
-                
-                const stillInCheck = this.#isSquareAttacked(kj, ki, enemyColor);
-                
-                // Reverter
-                p.boardJ = oj; p.boardI = oi;
-                if (targetPiece) targetPiece.setData('isCapturedSim', false);
-                
-                if (!stillInCheck) return false;
-              }
+              if (this.#isValidMove(p, tj, ti)) return false;
             }
           }
         }
@@ -242,6 +256,10 @@ export class Game extends Scene {
 
   #isValidMove(piece: Piece, targetJ: number, targetI: number, ignoreCheck: boolean = false): boolean {
     if (targetJ < 0 || targetJ > 7 || targetI < 0 || targetI > 7) return false;
+    if (targetJ === piece.boardJ && targetI === piece.boardI) return false;
+
+    if (!ignoreCheck && !this.#isMoveLegal(piece, targetJ, targetI)) return false;
+
     const pieceType = piece.pieceType, currentJ = piece.boardJ, currentI = piece.boardI, color = piece.pieceColor;
     const direction = color === PieceColor.WHITE ? -1 : 1;
 
@@ -306,12 +324,77 @@ export class Game extends Scene {
     return false;
   }
 
+  #getCPUMove(): { piece: Piece, targetJ: number, targetI: number } | null {
+    const moves: { piece: Piece, targetJ: number, targetI: number, score: number }[] = [];
+    const pieceValues: Record<number, number> = {
+      [PieceType.PAWN]: 1,
+      [PieceType.KNIGHT]: 3,
+      [PieceType.BISHOP]: 3,
+      [PieceType.ROOK]: 5,
+      [PieceType.QUEEN]: 9,
+      [PieceType.KING]: 100,
+    };
+
+    for (let j = 0; j < 8; j++) {
+      for (let i = 0; i < 8; i++) {
+        const piece = this.#board.getPieceAt(j, i);
+        if (!piece || piece.pieceColor !== PieceColor.BLACK) continue;
+        for (let tj = 0; tj < 8; tj++) {
+          for (let ti = 0; ti < 8; ti++) {
+            if (!this.#isValidMove(piece, tj, ti)) continue;
+            const targetPiece = this.#board.getPieceAt(tj, ti);
+            let score = targetPiece ? (pieceValues[targetPiece.pieceType] || 0) : 0;
+            score += Math.random() * 0.5;
+            moves.push({ piece, targetJ: tj, targetI: ti, score });
+          }
+        }
+      }
+    }
+
+    if (moves.length === 0) return null;
+    moves.sort((a, b) => b.score - a.score);
+    return moves[0];
+  }
+
+  #scheduleCPUMove(): void {
+    if (this.#cpuMoving) return;
+    if (!this.#cpuMode || this.#currentTurn !== PieceColor.BLACK) return;
+
+    this.#cpuMoving = true;
+    this.msg_text.setText("CPU IS THINKING...");
+
+    this.time.delayedCall(800, () => {
+      const move = this.#getCPUMove();
+      if (move) {
+        this.#cpuMoving = false;
+        this.#movePiece(move.piece, move.targetJ, move.targetI);
+      } else {
+        this.#cpuMoving = false;
+        if (this.#isCheckmate(PieceColor.BLACK)) {
+          this.scene.start('GameOver');
+        }
+      }
+    });
+  }
+
   #movePiece(piece: Piece, targetJ: number, targetI: number, toggleTurn: boolean = true): void {
     const targetPiece = this.#board.getPieceAt(targetJ, targetI);
     const isEnPassant = piece.pieceType === PieceType.PAWN && Math.abs(targetI - piece.boardI) === 1 && !targetPiece;
     if (targetPiece || isEnPassant) {
-      this.#pendingMove = { piece, targetJ, targetI, toggleTurn };
-      this.#challengeUI.setVisible(true);
+      if (this.#cpuMode && piece.pieceColor === PieceColor.BLACK) {
+        this.#executeMove(piece, targetJ, targetI, toggleTurn);
+        return;
+      }
+      const defender = targetPiece || this.#board.getPieceAt(piece.boardJ, targetI);
+      this.scene.launch('Fight', {
+        attacker: piece,
+        defender: defender,
+        targetJ: targetJ,
+        targetI: targetI,
+        toggleTurn: toggleTurn,
+        cpu: this.#cpuMode
+      });
+      this.scene.pause();
       return;
     }
     this.#executeMove(piece, targetJ, targetI, toggleTurn);
@@ -345,10 +428,16 @@ export class Game extends Scene {
 
     let isPromoting = false;
     if (pieceType === PieceType.PAWN && ((piece.pieceColor === PieceColor.WHITE && targetJ === 0) || (piece.pieceColor === PieceColor.BLACK && targetJ === 7))) {
-      this.#pendingPromotion = piece;
-      this.#promotionUI.list.forEach(obj => { if (obj instanceof Phaser.GameObjects.Image) obj.setTexture(piece.pieceColor, obj.getData('type')); });
-      this.#promotionUI.setVisible(true);
-      isPromoting = true;
+      if (this.#cpuMode && piece.pieceColor === PieceColor.BLACK) {
+        piece.pieceType = PieceType.QUEEN;
+        piece.setFrame(PieceType.QUEEN);
+        piece.setData('piece', PieceType.QUEEN);
+      } else {
+        this.#pendingPromotion = piece;
+        this.#promotionUI.list.forEach(obj => { if (obj instanceof Phaser.GameObjects.Image) obj.setTexture(piece.pieceColor, obj.getData('type')); });
+        this.#promotionUI.setVisible(true);
+        isPromoting = true;
+      }
     }
 
     if (pieceType === PieceType.KING && Math.abs(targetI - ci) === 2) {
@@ -381,39 +470,9 @@ export class Game extends Scene {
     } else {
       this.msg_text.setColor('#ffffff').setText(`${turnName}'S TURN`);
     }
-  }
 
-  #createChallengeUI(): void {
-    const bg = this.add.rectangle(0, 0, 240, 160, 0x333333, 0.9).setStrokeStyle(2, 0xffffff);
-    const title = this.add.text(0, -50, "CAPTURE CHALLENGE", { fontSize: '16px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
-    const sub = this.add.text(0, -20, "Concede capture?", { fontSize: '14px', color: '#cccccc' }).setOrigin(0.5);
-    this.#challengeResultText = this.add.text(0, 10, "", { fontSize: '32px', color: '#ffff00', fontStyle: 'bold' }).setOrigin(0.5);
-    const concedeBtn = this.add.rectangle(-60, 50, 80, 40, 0x00aa00).setInteractive();
-    const concedeTxt = this.add.text(-60, 50, "YES", { color: '#ffffff' }).setOrigin(0.5);
-    concedeBtn.on('pointerdown', () => this.#resolveCapture(true));
-    const fightBtn = this.add.rectangle(60, 50, 80, 40, 0xaa0000).setInteractive();
-    const fightTxt = this.add.text(60, 50, "FIGHT", { color: '#ffffff' }).setOrigin(0.5);
-    fightBtn.on('pointerdown', () => this.#resolveCapture(false));
-    this.#challengeUI = this.add.container(512, 384, [bg, title, sub, this.#challengeResultText, concedeBtn, concedeTxt, fightBtn, fightTxt]).setDepth(100).setVisible(false);
-  }
-
-  #resolveCapture(concede: boolean): void {
-    if (!this.#pendingMove) return;
-    const { piece: attacker, targetJ, targetI, toggleTurn } = this.#pendingMove;
-    if (concede) { this.#challengeUI.setVisible(false); this.#executeMove(attacker, targetJ, targetI, toggleTurn); this.#pendingMove = null; }
-    else {
-      const win = Math.random() < 0.5 ? 0 : 1;
-      this.#challengeResultText.setText(win.toString());
-      this.time.delayedCall(1000, () => {
-        this.#challengeUI.setVisible(false); this.#challengeResultText.setText("");
-        if (win === 1) this.#executeMove(attacker, targetJ, targetI, toggleTurn);
-        else {
-          if (attacker.pieceType === PieceType.KING) { this.scene.start('GameOver'); return; }
-          attacker.destroy();
-          if (toggleTurn) { this.#currentTurn = this.#currentTurn === PieceColor.WHITE ? PieceColor.BLACK : PieceColor.WHITE; this.#updateUI(); }
-        }
-        this.#pendingMove = null;
-      });
+    if (this.#cpuMode && this.#currentTurn === PieceColor.BLACK) {
+      this.#scheduleCPUMove();
     }
   }
 

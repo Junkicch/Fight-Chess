@@ -1,5 +1,5 @@
 import { Scene, GameObjects } from 'phaser';
-import { Piece, PieceType, PieceColor } from './Piece';
+import { Piece } from './Piece';
 
 export const BOARD_CONFIG = {
     CENTER_X: 512,

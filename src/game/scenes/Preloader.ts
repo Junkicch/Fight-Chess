@@ -1,4 +1,5 @@
 import { Scene } from 'phaser';
+import { FIGHTERS_DATA } from '../objects/Fighter';
 
 export class Preloader extends Scene {
   constructor() {
@@ -31,6 +32,38 @@ export class Preloader extends Scene {
     this.load.image('logo', 'logo.png');
 
     this.load.image('board', 'board.png');
+
+    this.load.image('chun-li-bg', 'fight_scenes/background/chun-li-bg-layer2.png');
+    this.load.image('akuma-bg', 'fight_scenes/background/akuma-bg-layer1.png');
+
+    // Dynamic loading of all fighters stance
+    Object.values(FIGHTERS_DATA).forEach(fighter => {
+        const loadS = (key: string, file: string) => {
+            const animConfig = fighter.animations[key];
+            const width = animConfig?.frameWidth || fighter.frameConfig.width;
+            const height = animConfig?.frameHeight || fighter.frameConfig.height;
+
+            const fullPath = `fight_scenes/${fighter.name}/${file}.png`;
+            this.load.spritesheet(`${fighter.assetKey}-${key}`, fullPath, {
+                frameWidth: width,
+                frameHeight: height
+            });
+        };
+
+        loadS('idle', 'Stance');
+        loadS('walkf', 'WalkF');
+        loadS('walkb', 'WalkB');
+        loadS('crouching', 'Crouching');
+        loadS('crouch', 'Crouch');
+        loadS('jump', 'Jump');
+        loadS('lp', 'LP');
+        loadS('mp', 'MP');
+        loadS('hp', 'HP');
+        loadS('lk', 'LK');
+        loadS('mk', 'MK');
+        loadS('hk', 'HK');
+        loadS('block', 'BlockM');
+    });
 
     this.load.spritesheet('bpieces', 'bpieces.png', { frameWidth: 80, frameHeight: 80 });
 
