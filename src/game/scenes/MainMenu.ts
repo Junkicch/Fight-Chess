@@ -48,16 +48,16 @@ export class MainMenu extends Scene
             this.scene.start('Game', { cpu: true });
         });
 
-        createButton(512, 540, 'Multiplayer', () => {
+        createButton(512, 520, 'Local Multiplayer', () => {
             this.scene.start('Game', { cpu: false });
         });
 
-        createButton(512, 620, 'Fight Scene', () => {
-            this.scene.start('Fight');
+        createButton(512, 600, 'Online Multiplayer', () => {
+            this.startOnlineMatchmaking();
         });
 
-        createButton(512, 700, 'Online', () => {
-            this.startOnlineMatchmaking();
+        createButton(512, 680, 'Fight Scene', () => {
+            this.scene.start('Fight');
         });
 
         this.statusText = this.add.text(512, 750, '', {

@@ -13,7 +13,7 @@ export interface ChessMove {
 }
 
 // Change this to your Render server URL after deployment
-const PRODUCTION_SERVER_URL = 'https://fight-chess-server.onrender.com';
+const PRODUCTION_SERVER_URL = 'https://fight-chess.onrender.com';
 
 export type NetworkCallback = {
   onMatchFound: (data: { roomId: string; you: number; opponent: number; color: string }) => void;
