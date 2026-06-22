@@ -30,7 +30,9 @@ export class Fight extends Scene {
   toggleTurn: boolean;
   isManualSelection: boolean = true;
   isCPU: boolean = false;
+  cpuAttacker: boolean = false;
   isFightOver: boolean = false;
+  private cpuReactionDelay: number = 0;
 
   private p1Keys: any;
   private p2AttackKeys: any;
@@ -53,9 +55,11 @@ export class Fight extends Scene {
       this.toggleTurn = data.toggleTurn;
       this.isManualSelection = false;
       this.isCPU = data.cpu === true;
+      this.cpuAttacker = data.cpuAttacker === true;
     } else {
       this.isManualSelection = true;
       this.isCPU = false;
+      this.cpuAttacker = false;
     }
   }
 
@@ -204,6 +208,11 @@ export class Fight extends Scene {
     const worldWidth = this.bgAkuma.displayWidth;
     const groundY = 650;
 
+    if (this.cpuAttacker) {
+      // CPU is attacker, human defends: P1 = defender, P2 = attacker
+      [p1Key, p2Key] = [p2Key, p1Key];
+    }
+
     // Set world bounds to ground level as a safety net
     this.physics.world.setBounds(0, 0, worldWidth, groundY);
 
@@ -283,8 +292,11 @@ export class Fight extends Scene {
   private checkWin() {
       if (this.player1.life <= 0 || this.player2.life <= 0) {
           this.isFightOver = true;
-          const winner = this.player1.life > 0 ? 'PLAYER 1' : 'PLAYER 2';
-          this.add.text(this.camera.scrollX + 512, 384, `${winner} WINS!`, {
+          const winnerLabel = this.player1.life > 0 ? 'PLAYER 1' : 'PLAYER 2';
+          const winnerSprite = this.player1.life > 0 ? this.player1 : this.player2;
+          winnerSprite.setPosition(this.cameras.main.scrollX + this.cameras.main.width / 2, winnerSprite.y);
+          (winnerSprite.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
+          this.add.text(this.cameras.main.scrollX + this.cameras.main.width / 2, 384, `${winnerLabel} WINS!`, {
               fontSize: '64px', color: '#ffffff', fontStyle: 'bold', stroke: '#000000', strokeThickness: 8
           }).setOrigin(0.5).setScrollFactor(0);
 
@@ -295,7 +307,9 @@ export class Fight extends Scene {
                   // Return to Game scene with the result
                   const gameScene = this.scene.get('Game') as any;
                   gameScene.handleFightResult({
-                      winner: this.player1.life > 0 ? 'attacker' : 'defender',
+                      winner: this.player1.life > 0
+                          ? (this.cpuAttacker ? 'defender' : 'attacker')
+                          : (this.cpuAttacker ? 'attacker' : 'defender'),
                       attacker: this.attackerData,
                       defender: this.defenderData,
                       targetJ: this.targetJ,
@@ -317,8 +331,16 @@ export class Fight extends Scene {
     const backward = distX < 0 ? 'left' : 'right';
     const rand = Math.random();
 
+    if (p1.getIsAttacking()) {
+      if (this.cpuReactionDelay < 10) {
+        this.cpuReactionDelay++;
+      }
+    } else {
+      this.cpuReactionDelay = 0;
+    }
+
     if (Math.abs(distX) < 250) {
-      if (p1.getIsAttacking() && rand < 0.6) {
+      if (p1.getIsAttacking() && this.cpuReactionDelay >= 10 && rand < 0.6) {
         return { left: backward === 'left', right: backward === 'right', up: false, down: false, lp: false, mp: false, hp: false, lk: false, mk: false, hk: false };
       }
       if (rand < 0.35) {

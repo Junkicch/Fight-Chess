@@ -343,7 +343,7 @@ export class FighterSprite extends Phaser.Physics.Arcade.Sprite {
         const extensionFactor = Math.sin(progress * Math.PI);
 
         if (extensionFactor > 0.2) {
-          const adjustedWidth = baseWidth - (attackType === 'mk' && this.stats.assetKey === 'dudley' ? 50 : 0) - (attackType === 'lp' && this.stats.assetKey === 'dudley' ? 20 : 0) - (attackType === 'mp' && this.stats.assetKey === 'sean' ? 20 : 0);
+          const adjustedWidth = baseWidth - (attackType === 'mk' && this.stats.assetKey === 'dudley' ? 50 : 0) - (attackType === 'lp' && this.stats.assetKey === 'dudley' ? 20 : 0) - (attackType === 'hk' && this.stats.assetKey === 'dudley' ? 20 : 0) - (this.stats.assetKey === 'dudley' ? 20 : 0) - (this.stats.assetKey === 'sean' ? 30 : 0) - (attackType === 'mp' && this.stats.assetKey === 'sean' ? 20 : 0) - (attackType === 'mk' && this.stats.assetKey === 'sean' ? 20 : 0) - (this.stats.assetKey === 'ken' ? 40 : 0) - (this.stats.assetKey === 'akuma' ? 30 : 0) - (attackType === 'mp' && this.stats.assetKey === 'akuma' ? 10 : 0) - (this.stats.assetKey === 'makoto' ? 30 : 0) - (attackType === 'mp' && this.stats.assetKey === 'makoto' ? 10 : 0) - (this.stats.assetKey === 'q' ? 20 : 0) - (attackType === 'mk' && this.stats.assetKey === 'q' ? 20 : 0) - (attackType === 'mp' && this.stats.assetKey === 'q' ? 20 : 0);
           const width = adjustedWidth * (0.4 + 0.6 * extensionFactor) * this.scale;
           const height = baseHeight * this.scale;
 
@@ -352,7 +352,9 @@ export class FighterSprite extends Phaser.Physics.Arcade.Sprite {
 
           this.attackBox.setPosition(attackX, attackY);
           this.attackBox.setSize(width, height);
-          this.attackBox.setVisible(true);
+          if (this.scene.physics.config.debug) {
+            this.attackBox.setVisible(true);
+          }
 
           const attackBody = this.attackBox.body as Phaser.Physics.Arcade.Body;
           attackBody.enable = true;

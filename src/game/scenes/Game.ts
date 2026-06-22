@@ -381,10 +381,6 @@ export class Game extends Scene {
     const targetPiece = this.#board.getPieceAt(targetJ, targetI);
     const isEnPassant = piece.pieceType === PieceType.PAWN && Math.abs(targetI - piece.boardI) === 1 && !targetPiece;
     if (targetPiece || isEnPassant) {
-      if (this.#cpuMode && piece.pieceColor === PieceColor.BLACK) {
-        this.#executeMove(piece, targetJ, targetI, toggleTurn);
-        return;
-      }
       const defender = targetPiece || this.#board.getPieceAt(piece.boardJ, targetI);
       this.scene.launch('Fight', {
         attacker: piece,
@@ -392,7 +388,8 @@ export class Game extends Scene {
         targetJ: targetJ,
         targetI: targetI,
         toggleTurn: toggleTurn,
-        cpu: this.#cpuMode
+        cpu: this.#cpuMode,
+        cpuAttacker: this.#cpuMode && piece.pieceColor === PieceColor.BLACK
       });
       this.scene.pause();
       return;
